@@ -138,6 +138,7 @@ document.querySelector('#center-earth').onclick = () => {
   azimuth = observer?.longitude ?? 20 * radians;
   elevation = observer?.latitude ?? 18 * radians;
   zoom = 1;
+  updateZoomControls();
   render();
 };
 function adjust(dx, dy) {
@@ -182,9 +183,21 @@ canvas.addEventListener('pointerup', event => {
   pointer = null;
 });
 canvas.addEventListener('pointercancel', () => { pointer = null; });
+const zoomIn = document.querySelector('#earth-zoom-in');
+const zoomOut = document.querySelector('#earth-zoom-out');
+function changeZoom(scale) {
+  zoom = Math.max(.55, Math.min(1.6, zoom * scale));
+  updateZoomControls();
+  render();
+}
+function updateZoomControls() {
+  zoomIn.disabled = zoom >= 1.6;
+  zoomOut.disabled = zoom <= .55;
+}
+zoomIn.onclick = () => changeZoom(1.2);
+zoomOut.onclick = () => changeZoom(1 / 1.2);
 canvas.addEventListener('wheel', event => {
   if (document.activeElement !== canvas) return;
   event.preventDefault();
-  zoom = Math.max(.55, Math.min(1.6, zoom * Math.exp(-event.deltaY * .001)));
-  render();
+  changeZoom(Math.exp(-event.deltaY * .001));
 }, { passive: false });

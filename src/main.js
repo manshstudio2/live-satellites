@@ -28,53 +28,77 @@ function read(key) {
 function write(key, value) {
   try { localStorage.setItem(key, value); } catch { /* The tracker works without local storage. */ }
 }
-const feedRequests = new Map();
-async function fetchElements(url, key) {
-  if (feedRequests.has(key)) return feedRequests.get(key);
-  const task = (async () => {
-    const storage = await window.caches?.open('live-satellites-orbits-v1').catch(() => null);
-    const cached = await storage?.match(url).catch(() => null);
-    const previous = await cached?.text().catch(() => null);
-    const lastAttempt = Math.max(Number(read(key + '-attempt')), feedAttempts.get(key) ?? 0);
-    if (read(key + '-paused') || feedPaused.has(key) || Date.now() - lastAttempt < twoHours) return previous;
-    feedAttempts.set(key, Date.now());
-    write(key + '-attempt', String(Date.now()));
-    try {
-      const response = await fetch(url, { signal: AbortSignal.timeout(key === 'active-gp' ? 120000 : 15000) });
-      if (!response.ok) {
-        write(key + '-paused', '1');
-        feedPaused.add(key);
-        return previous;
-      }
-      const copy = response.clone();
-      const csv = await response.text();
-      parseCatalog(csv);
-      await storage?.put(url, copy).catch(() => {});
-      return csv;
-    } catch {
-      return previous;
-    }
-  })();
-  feedRequests.set(key, task);
-  try { return await task; } finally { feedRequests.delete(key); }
-}
-const feedAttempts = new Map();
-const feedPaused = new Set();
+const feedKey = 'active-gp';
+let catalogStatus = 'Loading CelesTrak catalog…';
+let catalogRequest;
+let lastFeedAttempt = 0;
 
-async function loadCatalog() {
-  const csv = await fetchElements(activeUrl, 'active-gp');
-  if (csv) {
-    catalog = parseCatalog(csv);
-    catalog.delete('25544');
+function setCatalogStatus(message) {
+  catalogStatus = message;
+  byId('feed').textContent = message;
+}
+function useCatalog(csv, cached) {
+  const next = parseCatalog(csv);
+  next.delete('25544');
+  const now = Date.now();
+  for (const [id, satellite] of next) {
+    if (!isFresh(satellite, now)) next.delete(id);
   }
+  if (!next.size) return false;
+  catalog = next;
   if (!catalog.has(selectedId)) selectedId = undefined;
-  byId('feed').textContent = catalog.size
-    ? catalog.size.toLocaleString() + ' active satellites · CelesTrak'
-    : 'The active satellite catalog is unavailable. Live positions will appear when orbital data loads.';
   passCache.clear();
-  lastPosition = 0;
+  lastPosition = lastScan = 0;
+  setCatalogStatus(catalog.size.toLocaleString() + ' active satellites · ' + (cached ? 'saved CelesTrak data' : 'CelesTrak'));
   showSearch();
   update();
+  return true;
+}
+function loadCatalog() {
+  if (!catalogRequest) catalogRequest = refreshCatalog().finally(() => { catalogRequest = null; });
+  return catalogRequest;
+}
+async function refreshCatalog() {
+  const storage = await window.caches?.open('live-satellites-orbits-v1').catch(() => null);
+  if (!catalog.size) {
+    const cached = await storage?.match(activeUrl).catch(() => null);
+    if (cached) {
+      try { useCatalog(await cached.text(), true); } catch { /* A malformed cache can be replaced. */ }
+    }
+  }
+  const paused = read(feedKey + '-paused');
+  if (paused) {
+    if (!catalog.size) setCatalogStatus('CelesTrak rejected the catalog request. Refresh is paused.');
+    return;
+  }
+  const lastAttempt = Math.max(Number(read(feedKey + '-attempt')), lastFeedAttempt);
+  if (Date.now() - lastAttempt < twoHours) {
+    if (!catalog.size) setCatalogStatus('No saved orbital data. The next download is eligible after ' + timeLabel.format(lastAttempt + twoHours) + '.');
+    return;
+  }
+  lastFeedAttempt = Date.now();
+  write(feedKey + '-attempt', String(lastFeedAttempt));
+  if (!catalog.size) setCatalogStatus('Downloading the full CelesTrak catalog…');
+  const slow = setTimeout(() => {
+    if (!catalog.size) setCatalogStatus('The CelesTrak download is slow. Still downloading…');
+  }, 8000);
+  try {
+    const response = await fetch(activeUrl, { signal: AbortSignal.timeout(120000) });
+    if (!response.ok) {
+      write(feedKey + '-paused', String(response.status));
+      setCatalogStatus((catalog.size ? 'Using saved orbital data. ' : '') +
+        'CelesTrak returned HTTP ' + response.status + '. Refresh is paused.');
+      return;
+    }
+    const copy = response.clone();
+    if (!useCatalog(await response.text(), false)) throw new Error('No current orbital data');
+    await storage?.put(activeUrl, copy).catch(() => {});
+  } catch (error) {
+    setCatalogStatus((catalog.size ? 'Using saved orbital data. ' : '') +
+      (error.name === 'TimeoutError' ? 'The CelesTrak download timed out.' : 'Could not load current orbital data.'));
+  } finally {
+    clearTimeout(slow);
+  }
 }
 
 function isFresh(satellite, now) {
@@ -132,7 +156,7 @@ function update() {
       const targets = observer ? satellitesAbove(now, clock) : [];
       updateGlobe(observer, targets, now, selectedId, selectSatellite);
       byId('earth-status').textContent = observer
-        ? catalog.size ? targets.length + ' predicted above your horizon' : 'Waiting for orbital data'
+        ? catalog.size ? targets.length + ' predicted above your horizon' : catalogStatus
         : 'Use your location to see satellites above you.';
     }
     const point = fresh && groundAt(satellite.record, now);
@@ -238,7 +262,7 @@ function drawCamera(now, clock) {
   const count = inFrame.length;
   byId('sky-summary').textContent = skyTargets.length + ' above your horizon · ' + count + ' in view';
   guidance.textContent = count ? count + (count === 1 ? ' predicted satellite in view' : ' predicted satellites in view')
-    : catalog.size ? 'No predicted satellites in this direction' : 'Waiting for orbital data';
+    : catalog.size ? 'No predicted satellites in this direction' : catalogStatus;
   matchLabel.textContent = likely ? 'Likely match · ' + best.satellite.name
     : latest && now - latest.time < 550
       ? best ? 'Possible matches · keep the light centered' : 'No confident satellite match'
@@ -374,8 +398,7 @@ document.addEventListener('visibilitychange', () => {
 });
 setInterval(update, 120);
 setInterval(() => {
-  if (!document.hidden && Date.now() - Math.max(Number(read('active-gp-attempt')), feedAttempts.get('active-gp') ?? 0) >= twoHours &&
-      !read('active-gp-paused') && !feedPaused.has('active-gp')) void loadCatalog();
+  if (!document.hidden && Date.now() - Math.max(Number(read(feedKey + '-attempt')), lastFeedAttempt) >= twoHours && !read(feedKey + '-paused')) void loadCatalog();
 }, 60_000);
 route();
 void loadLand().then(() => { lastPosition = 0; update(); }).catch(() => { byId('earth-map-error').textContent = 'Earth texture unavailable.'; });
