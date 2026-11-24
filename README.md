@@ -1,6 +1,6 @@
 # LIve Satellites
 
-An Android-first web prototype with two views. **AR View** compares a bright camera target near the reticle with predicted satellite tracks. **2D View** shows the selected satellite's current position, ground track, altitude and local pass information. In AR View, active satellites are overlaid automatically without a default target. Search by name in 2D View.
+An Android-first web prototype with two views. **AR View** compares a bright camera target near the reticle with predicted satellite tracks. **3D Earth** shows the observer and satellites above the local horizon on a rotatable globe. In AR View, active satellites are overlaid automatically without a default target. Search by name in 3D Earth. The ISS is excluded from both views.
 
 ## Local build and deployment
 

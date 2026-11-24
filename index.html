@@ -9,7 +9,7 @@
 <body>
   <main>
     <header><h1>LIve Satellites</h1></header>
-    <nav aria-label="Views"><a href="#ar" id="ar-link">AR View</a><a href="#map" id="map-link">2D View</a></nav>
+    <nav aria-label="Views"><a href="#ar" id="ar-link">AR View</a><a href="#earth" id="earth-link">3D Earth</a></nav>
     <section id="ar" aria-label="AR View">
       <div class="view" aria-label="Sky camera">
         <video muted playsinline></video>
@@ -21,11 +21,11 @@
       <p id="sky-summary"></p><p id="matching" class="note"></p>
       <ul id="candidates" aria-label="Likely satellite matches"></ul>
     </section>
-    <section id="map" aria-label="2D View" hidden>
-      <div class="map-frame">
-        <canvas id="world" width="960" height="480" role="img" aria-label="World map with the selected satellite ground track and observer location"></canvas>
+    <section id="earth" aria-label="3D Earth" hidden>
+      <div class="earth-frame">
+        <canvas id="world" width="760" height="600" tabindex="0" role="img" aria-label="3D Earth with satellite positions"></canvas>
       </div>
-      <p id="map-status" role="status"></p><p class="note legend">Blue · satellite and ground track (dashed ahead) &nbsp; Mint · you</p>
+      <p id="earth-map-error" role="status"></p><p id="earth-status"></p><button id="center-earth" type="button">Recenter Earth</button><p class="note legend">Drag to rotate. Blue dots are satellites. Mint marks your location. Orbital heights are visually compressed.</p>
     </section>
     <section class="readout" aria-label="Satellite information">
       <div class="actions"><button id="location">Use my location</button></div>

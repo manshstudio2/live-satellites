@@ -1,7 +1,7 @@
 import './style.css';
 import { findPass, groundAt, lookAt, parseCatalog, radians, skyClock, skyIsDark } from './orbit.js';
 import { project } from './camera.js';
-import { drawMap, loadLand } from './map.js';
+import { updateGlobe, loadLand } from './globe.js';
 import { centerLight } from './light.js';
 
 const byId = id => document.getElementById(id);
@@ -14,8 +14,8 @@ const timeLabel = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', time
 const passCache = new Map();
 let catalog = new Map();
 let selectedId;
-let observer, pose, stream, arError, lastMap = 0;
-let mapMode = false;
+let observer, pose, stream, arError, lastPosition = 0;
+let earthMode = false;
 let samples = [];
 let matches = [];
 let lastScan = 0;
@@ -63,13 +63,16 @@ const feedPaused = new Set();
 
 async function loadCatalog() {
   const csv = await fetchElements(activeUrl, 'active-gp');
-  if (csv) catalog = parseCatalog(csv);
+  if (csv) {
+    catalog = parseCatalog(csv);
+    catalog.delete('25544');
+  }
   if (!catalog.has(selectedId)) selectedId = undefined;
   byId('feed').textContent = catalog.size
     ? catalog.size.toLocaleString() + ' active satellites · CelesTrak'
     : 'The active satellite catalog is unavailable. Live positions will appear when orbital data loads.';
-    passCache.clear();
-  lastMap = 0;
+  passCache.clear();
+  lastPosition = 0;
   showSearch();
   update();
 }
@@ -82,7 +85,7 @@ function formatAngle(angle) {
 }
 function selectSatellite(id) {
   selectedId = id;
-  lastMap = 0;
+  lastPosition = 0;
   update();
 }
 function renderList(element, satellites) {
@@ -123,9 +126,16 @@ function update() {
   const clock = skyClock(now);
   const look = fresh && observer ? lookAt(satellite.record, observer, now, clock) : null;
   byId('pass-title').textContent = satellite ? satellite.name : 'Satellite details';
-  if (now - lastMap >= 1000) {
-    lastMap = now;
-    const point = mapMode ? drawMap(fresh ? satellite : null, observer, now) : fresh && groundAt(satellite.record, now);
+  if (now - lastPosition >= 1000) {
+    lastPosition = now;
+    if (earthMode) {
+      const targets = observer ? satellitesAbove(now, clock) : [];
+      updateGlobe(observer, targets, now, selectedId, selectSatellite);
+      byId('earth-status').textContent = observer
+        ? catalog.size ? targets.length + ' predicted above your horizon' : 'Waiting for orbital data'
+        : 'Use your location to see satellites above you.';
+    }
+    const point = fresh && groundAt(satellite.record, now);
     byId('position').textContent = point
       ? 'Current position · ' + formatAngle(point.latitude) + ', ' + formatAngle(point.longitude) +
         ' · ' + Math.round(point.height).toLocaleString() + ' km altitude · ' + timeLabel.format(now)
@@ -158,7 +168,18 @@ function update() {
     byId('peak').textContent = timeLabel.format(pass.peak) + ' · ' + formatAngle(pass.max);
     byId('set').textContent = timeLabel.format(pass.set);
   }
-  if (!mapMode) drawCamera(now, clock);
+  if (!earthMode) drawCamera(now, clock);
+}
+
+function satellitesAbove(now, clock) {
+  const dark = skyIsDark(observer, clock);
+  const targets = [];
+  for (const satellite of catalog.values()) {
+    if (!isFresh(satellite, now)) continue;
+    const look = lookAt(satellite.record, observer, now, clock);
+    if (look?.elevation >= 0) targets.push({ satellite, look, lit: dark && look.sunlit });
+  }
+  return targets;
 }
 
 function drawCamera(now, clock) {
@@ -168,7 +189,7 @@ function drawCamera(now, clock) {
   if (!stream || !observer || !pose || performance.now() - pose.received > 2500) {
     guidance.textContent = !stream ? arError || 'Start the camera and point it at the sky.'
       : !observer ? 'Allow location to see satellites in your camera view.'
-        : 'Compass unavailable. Try the 2D View.';
+        : 'Compass unavailable. Try 3D Earth.';
     matchLabel.textContent = '';
     byId('sky-summary').textContent = '';
     samples = [];
@@ -193,13 +214,7 @@ function drawCamera(now, clock) {
   }
   if (scan) {
     lastScan = now;
-    const dark = skyIsDark(observer, clock);
-    skyTargets = [];
-    for (const candidate of catalog.values()) {
-      if (!isFresh(candidate, now)) continue;
-      const look = lookAt(candidate.record, observer, now, clock);
-      if (look?.elevation >= 0) skyTargets.push({ satellite: candidate, look, lit: dark && look.sunlit });
-    }
+    skyTargets = satellitesAbove(now, clock);
   }
   const inFrame = [];
   for (const target of skyTargets) {
@@ -217,7 +232,7 @@ function drawCamera(now, clock) {
   const featured = likely ? best.satellite.id : null;
   if (featured && selectedId !== featured) {
     selectedId = featured;
-    lastMap = 0;
+    lastPosition = 0;
   }
   paintTargets(overlay, inFrame, featured);
   const count = inFrame.length;
@@ -300,7 +315,7 @@ function requestLocation() {
   navigator.geolocation.getCurrentPosition(({ coords }) => {
     observer = { latitude: coords.latitude * radians, longitude: coords.longitude * radians, height: (coords.altitude ?? 0) / 1000 };
     passCache.clear();
-    lastMap = 0;
+    lastPosition = 0;
     update();
   }, () => {
     byId('observer').textContent = 'Location unavailable. Check browser permissions and try again.';
@@ -314,14 +329,15 @@ function stopCamera() {
   byId('camera').textContent = 'Start camera';
 }
 function route() {
-  mapMode = window.location.hash === '#map';
-  byId('map').hidden = !mapMode;
-  byId('ar').hidden = mapMode;
-  byId('satellite-search').hidden = !mapMode;
-  byId('ar-link').setAttribute('aria-current', mapMode ? 'false' : 'page');
-  byId('map-link').setAttribute('aria-current', mapMode ? 'page' : 'false');
-  if (mapMode) stopCamera();
-  lastMap = 0;
+  earthMode = ['#earth', '#map'].includes(window.location.hash);
+  if (window.location.hash === '#map') history.replaceState(null, '', '#earth');
+  byId('earth').hidden = !earthMode;
+  byId('ar').hidden = earthMode;
+  byId('satellite-search').hidden = !earthMode;
+  byId('ar-link').setAttribute('aria-current', earthMode ? 'false' : 'page');
+  byId('earth-link').setAttribute('aria-current', earthMode ? 'page' : 'false');
+  if (earthMode) stopCamera();
+  lastPosition = 0;
   update();
 }
 byId('camera').onclick = async () => {
@@ -334,7 +350,7 @@ byId('camera').onclick = async () => {
       await DeviceOrientationEvent.requestPermission().catch(() => 'denied');
     }
     const camera = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false });
-    if (document.hidden || mapMode) { camera.getTracks().forEach(track => track.stop()); return; }
+    if (document.hidden || earthMode) { camera.getTracks().forEach(track => track.stop()); return; }
     stream = camera;
     video.srcObject = stream;
     await video.play();
@@ -362,5 +378,5 @@ setInterval(() => {
       !read('active-gp-paused') && !feedPaused.has('active-gp')) void loadCatalog();
 }, 60_000);
 route();
-void loadLand().then(() => { lastMap = 0; update(); }).catch(() => { byId('map-status').textContent = 'Basemap unavailable.'; });
+void loadLand().then(() => { lastPosition = 0; update(); }).catch(() => { byId('earth-map-error').textContent = 'Earth texture unavailable.'; });
 void loadCatalog();
