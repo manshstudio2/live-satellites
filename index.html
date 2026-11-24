@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#101c21">
+  <title>LIve Satellites · Sky tracker</title>
+</head>
+<body>
+  <main>
+    <header><h1>LIve Satellites</h1></header>
+    <nav aria-label="Views"><a href="#ar" id="ar-link">AR View</a><a href="#map" id="map-link">2D View</a></nav>
+    <section id="ar" aria-label="AR View">
+      <div class="view" aria-label="Sky camera">
+        <video muted playsinline></video>
+        <span class="cross" aria-hidden="true"></span>
+        <span id="marker" hidden></span>
+        <p id="guidance">Start the camera and hold a moving light in the reticle.</p>
+      </div>
+      <div class="actions"><button id="camera">Start camera</button></div>
+      <p id="matching" class="note">Matches are estimates. Aircraft and other lights may look similar.</p>
+      <ul id="candidates" aria-label="Likely satellite matches"></ul>
+    </section>
+    <section id="map" aria-label="2D View" hidden>
+      <div class="map-frame">
+        <canvas id="world" width="960" height="480" role="img" aria-label="World map with the selected satellite ground track and observer location"></canvas>
+      </div>
+      <p id="map-status" role="status"></p><p class="note legend">Blue · satellite and ground track (dashed ahead) &nbsp; Mint · you</p>
+    </section>
+    <section class="readout" aria-labelledby="pass-title">
+      <div class="actions"><button id="location">Use my location</button></div>
+      <label for="search">Find a satellite</label>
+      <input type="search" id="search" placeholder="Name or NORAD ID" autocomplete="off">
+      <p id="search-status" role="status"></p><ul id="results" aria-label="Satellite search results"></ul>
+      <p id="feed" role="status">Loading orbital data…</p>
+      <h2 id="pass-title">Satellite details</h2>
+      <p id="position"></p>
+      <p id="direction"></p>
+      <p id="observer" role="status">Location is needed for local predictions.</p>
+      <p id="visibility"></p>
+      <dl id="pass" hidden>
+        <div><dt>Above 10°</dt><dd id="rise"></dd></div>
+        <div><dt>Peak</dt><dd id="peak"></dd></div>
+        <div><dt>Below 10°</dt><dd id="set"></dd></div>
+      </dl>
+      <p class="note">Camera and location data stay on this device.</p>
+    </section>
+    <footer>Orbital elements from <a href="https://celestrak.org/">CelesTrak</a>. Basemap from <a href="https://www.naturalearthdata.com/">Natural Earth</a>.</footer>
+  </main>
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>
+

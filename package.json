@@ -1,0 +1,15 @@
+{
+  "name": "ufoands",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build"
+  },
+  "dependencies": {
+    "satellite.js": "^6.0.1"
+  },
+  "devDependencies": {
+    "vite": "^6.4.1"
+  }
+}
