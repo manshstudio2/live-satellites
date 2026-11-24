@@ -8,6 +8,7 @@ const byId = id => document.getElementById(id);
 const video = document.querySelector('video');
 const view = document.querySelector('.view');
 const activeUrl = 'https://celestrak.org/NORAD/elements/gp.php?GROUP=active&FORMAT=CSV';
+const stationsUrl = 'https://celestrak.org/NORAD/elements/gp.php?GROUP=stations&FORMAT=CSV';
 const issUrl = 'https://celestrak.org/NORAD/elements/gp.php?CATNR=25544&FORMAT=CSV';
 const twoHours = 7_200_000;
 const staleAge = 3 * 86_400_000;
@@ -21,6 +22,8 @@ let mapMode = false;
 let samples = [];
 let matches = [];
 let lastScan = 0;
+let lastLightSample = 0;
+let skyTargets = [];
 
 function read(key) {
   try { return localStorage.getItem(key); } catch { return null; }
@@ -67,14 +70,14 @@ async function loadCatalog() {
     catalog = parseCatalog(csv);
     activeCatalog = true;
   } else if (!catalog.size) {
-    const iss = await fetchElements(issUrl, 'iss-gp');
-    if (iss) catalog = parseCatalog(iss);
+    const nearbyCatalog = await fetchElements(stationsUrl, 'stations-gp') ?? await fetchElements(issUrl, 'iss-gp');
+    if (nearbyCatalog) catalog = parseCatalog(nearbyCatalog);
   }
   if (!catalog.has(selectedId)) selectedId = catalog.keys().next().value ?? '25544';
   if (catalog.size) {
     byId('feed').textContent = activeCatalog
       ? catalog.size.toLocaleString() + ' active satellites · CelesTrak'
-      : 'Full catalog unavailable · ISS fallback';
+      : catalog.size > 1 ? 'Full catalog unavailable · ' + catalog.size + ' space station objects' : 'Full catalog unavailable · ISS fallback';
   } else {
     byId('feed').textContent = 'Orbital data unavailable. Try again later.';
   }
@@ -103,7 +106,7 @@ function renderList(element, satellites) {
     const item = document.createElement('li');
     const button = document.createElement('button');
     button.type = 'button';
-    button.textContent = sat.name + ' · ' + sat.id;
+    button.textContent = sat.name;
     button.onclick = () => selectSatellite(sat.id);
     item.append(button);
     return item;
@@ -114,11 +117,9 @@ function showSearch() {
   const results = byId('results');
   const found = [];
   if (query) {
-    const exact = catalog.get(query);
-    if (exact) found.push(exact);
     for (const sat of catalog.values()) {
       if (found.length >= 8) break;
-      if (sat !== exact && (sat.name.toUpperCase().includes(query) || sat.id.includes(query))) found.push(sat);
+      if (sat.name.toUpperCase().includes(query)) found.push(sat);
     }
   }
   renderList(results, found);
@@ -133,7 +134,7 @@ function update() {
   const fresh = isFresh(satellite, now);
   const clock = skyClock(now);
   const look = fresh && observer ? lookAt(satellite.record, observer, now, clock) : null;
-  byId('pass-title').textContent = satellite ? satellite.name + ' · NORAD ' + satellite.id : 'Satellite details';
+  byId('pass-title').textContent = satellite ? satellite.name : 'Satellite details';
   if (now - lastMap >= 1000) {
     lastMap = now;
     const point = mapMode ? drawMap(fresh ? satellite : null, observer, now) : fresh && groundAt(satellite.record, now);
@@ -168,19 +169,23 @@ function update() {
     byId('peak').textContent = timeLabel.format(pass.peak) + ' · ' + formatAngle(pass.max);
     byId('set').textContent = timeLabel.format(pass.set);
   }
-  if (!mapMode) drawCamera(now, clock, satellite, look);
+  if (!mapMode) drawCamera(now, clock);
 }
 
-function drawCamera(now, clock, satellite, selectedLook) {
-  const marker = byId('marker');
+function drawCamera(now, clock) {
+  const overlay = byId('satellite-overlay');
   const guidance = byId('guidance');
-  marker.hidden = true;
+  const matchLabel = byId('matching');
   if (!stream || !observer || !pose || performance.now() - pose.received > 2500) {
-    guidance.textContent = !stream
-      ? arError || 'Start the camera and hold a moving light in the reticle.'
-      : !observer ? 'Use your location to identify satellites.' : 'Compass unavailable. Try the 2D View.';
+    guidance.textContent = !stream ? arError || 'Start the camera and point it at the sky.'
+      : !observer ? 'Allow location to see satellites in your camera view.'
+        : 'Compass unavailable. Try the 2D View.';
+    matchLabel.textContent = '';
     samples = [];
     matches = [];
+    skyTargets = [];
+    lastScan = 0;
+    overlay.replaceChildren();
     renderList(byId('candidates'), []);
     return;
   }
@@ -188,59 +193,105 @@ function drawCamera(now, clock, satellite, selectedLook) {
   const height = view.clientHeight;
   const rotation = (screen.orientation?.angle ?? window.orientation ?? 0) * radians;
   const radius = Math.min(width, height) * .15;
-  const light = centerLight(video, view, radius);
-  samples = samples.filter(sample => now - sample.time <= 3500);
-  if (light) samples.push({ time: now, light, pose, width, height, rotation });
-  if (now - lastScan >= 900) {
-    lastScan = now;
-    matches = rankMatches(now, clock, width, height, rotation, radius);
-    renderList(byId('candidates'), matches.slice(0, 3).map(match => match.satellite));
+  const scan = now - lastScan >= 850;
+  let light;
+  if (now - lastLightSample >= 240) {
+    lastLightSample = now;
+    light = centerLight(video, view, radius);
+    samples = samples.filter(sample => now - sample.time <= 3500);
+    if (light) samples.push({ time: now, light, pose, width, height, rotation });
   }
+  if (scan) {
+    lastScan = now;
+    const dark = skyIsDark(observer, clock);
+    skyTargets = [];
+    for (const candidate of catalog.values()) {
+      if (!isFresh(candidate, now)) continue;
+      const look = lookAt(candidate.record, observer, now, clock);
+      if (look?.elevation >= 0) skyTargets.push({ satellite: candidate, look, lit: dark && look.sunlit });
+    }
+  }
+  const inFrame = [];
+  for (const target of skyTargets) {
+    const point = project(target.look, pose, width, height, rotation);
+    if (!point.visible) continue;
+    inFrame.push({ ...target, point, center: Math.hypot(point.x - width / 2, point.y - height / 2) });
+  }
+  inFrame.sort((a, b) => a.center - b.center);
+  if (scan) matches = rankMatches(inFrame, radius);
   const [best, second] = matches;
-  const confident = light && best?.samples >= 5 && best.score < radius * .5 &&
-    (!second || second.score - best.score > radius * .2);
-  guidance.textContent = confident ? 'Likely match · ' + best.satellite.name
-    : best ? 'Possible matches · hold the light steady in the reticle'
-    : light ? 'No confident satellite match' : 'Center a moving light in the reticle';
-  const tracked = confident ? best.satellite : satellite;
-  const look = confident ? lookAt(tracked.record, observer, now, clock) : selectedLook;
-  if (!look || look.elevation < 0) return;
-  const point = project(look, pose, width, height, rotation);
-  if (!point.visible) return;
-  marker.style.left = point.x + 'px';
-  marker.style.top = point.y + 'px';
-  marker.textContent = tracked.name;
-  marker.hidden = false;
+  const latest = samples.at(-1);
+  const likely = best && latest && now - latest.time < 550 && best.samples >= 6 && best.lit &&
+    best.score < radius * .5 && (!second || second.score - best.score > radius * .2) &&
+    inFrame.some(target => target.satellite.id === best.satellite.id);
+  const featured = likely ? best.satellite.id : null;
+  if (featured && selectedId !== featured) {
+    selectedId = featured;
+    lastMap = 0;
+  }
+  paintTargets(overlay, inFrame, featured);
+  const count = inFrame.length;
+  guidance.textContent = count ? count + (count === 1 ? ' predicted satellite in view' : ' predicted satellites in view')
+    : catalog.size ? 'No predicted satellites in this direction' : 'Waiting for orbital data';
+  matchLabel.textContent = likely ? 'Likely match · ' + best.satellite.name
+    : latest && now - latest.time < 550
+      ? best ? 'Possible matches · keep the light centered' : 'No confident satellite match'
+      : 'Center a moving light to identify it';
+  renderList(byId('candidates'), matches.map(match => match.satellite));
 }
 
-function rankMatches(now, clock, width, height, rotation, radius) {
-  const recent = samples.slice(-8);
-  const target = recent.at(-1)?.light ?? { x: width / 2, y: height / 2 };
-  const dark = skyIsDark(observer, clock);
-  const nearby = [];
-  for (const satellite of catalog.values()) {
-    if (!isFresh(satellite, now)) continue;
-    const look = lookAt(satellite.record, observer, now, clock);
-    if (!look || look.elevation < 0) continue;
-    const projected = project(look, pose, width, height, rotation);
-    if (!projected.visible) continue;
-    const distance = Math.hypot(projected.x - target.x, projected.y - target.y);
-    if (distance <= radius) nearby.push({ satellite, score: distance, lit: look.sunlit && dark, samples: 0 });
+function paintTargets(overlay, targets, featured) {
+  const shown = targets.slice(0, 24);
+  const match = targets.find(target => target.satellite.id === featured);
+  if (match && !shown.includes(match)) shown.unshift(match);
+  const positions = new Map(shown.map((target, index) => [target.satellite.id, { target, index }]));
+  for (const marker of overlay.children) {
+    if (!positions.has(marker.dataset.id)) marker.hidden = true;
   }
-  nearby.sort((a, b) => a.score - b.score);
-  const sampleClocks = recent.map(sample => skyClock(sample.time));
-  for (const candidate of nearby.slice(0, 16)) {
-    if (!recent.length) break;
+  const existing = new Map(Array.from(overlay.children, marker => [marker.dataset.id, marker]));
+  for (const [id, { target, index }] of positions) {
+    let marker = existing.get(id);
+    if (!marker) {
+      marker = document.createElement('button');
+      marker.type = 'button';
+      marker.dataset.id = id;
+      marker.className = 'sky-target';
+      marker.addEventListener('click', () => selectSatellite(id));
+      overlay.append(marker);
+    }
+    marker.hidden = false;
+    marker.style.left = target.point.x + 'px';
+    marker.style.top = target.point.y + 'px';
+    marker.classList.toggle('likely', id === featured);
+    marker.classList.toggle('illuminated', target.lit);
+    marker.setAttribute('aria-label', target.satellite.name + (id === featured ? ', likely match' : ', predicted position'));
+    marker.textContent = index < 5 || id === featured ? target.satellite.name : '•';
+  }
+  for (const marker of Array.from(overlay.children)) {
+    if (marker.hidden && document.activeElement !== marker) marker.remove();
+  }
+}
+
+function rankMatches(inFrame, radius) {
+  const recent = samples.slice(-10);
+  if (!recent.length) return [];
+  const target = recent.at(-1).light;
+  const nearby = inFrame
+    .map(candidate => ({ ...candidate, score: Math.hypot(candidate.point.x - target.x, candidate.point.y - target.y) }))
+    .filter(candidate => candidate.score <= radius)
+    .sort((a, b) => a.score - b.score).slice(0, 16);
+  const clocks = recent.map(sample => skyClock(sample.time));
+  for (const candidate of nearby) {
     let sum = 0;
     for (const [index, sample] of recent.entries()) {
-      const look = lookAt(candidate.satellite.record, observer, sample.time, sampleClocks[index]);
+      const look = lookAt(candidate.satellite.record, observer, sample.time, clocks[index]);
       const point = look && project(look, sample.pose, sample.width, sample.height, sample.rotation);
       sum += point?.visible ? Math.hypot(point.x - sample.light.x, point.y - sample.light.y) : radius * 2;
     }
     candidate.samples = recent.length;
     candidate.score = sum / recent.length + (candidate.lit ? 0 : radius * .3);
   }
-  return nearby.slice(0, 16).sort((a, b) => a.score - b.score).slice(0, 3);
+  return nearby.sort((a, b) => a.score - b.score).slice(0, 3);
 }
 
 function receivePose(event) {
@@ -249,7 +300,7 @@ function receivePose(event) {
     pose = { alpha: event.alpha * radians, beta: event.beta * radians, gamma: event.gamma * radians, received: performance.now() };
   }
 }
-byId('location').onclick = () => {
+function requestLocation() {
   if (!navigator.geolocation) {
     byId('observer').textContent = 'Location requires a supported browser over HTTPS.';
     return;
@@ -263,7 +314,8 @@ byId('location').onclick = () => {
   }, () => {
     byId('observer').textContent = 'Location unavailable. Check browser permissions and try again.';
   }, { timeout: 12000 });
-};
+}
+byId('location').onclick = requestLocation;
 function stopCamera() {
   stream?.getTracks().forEach(track => track.stop());
   stream = null;
@@ -274,6 +326,7 @@ function route() {
   mapMode = window.location.hash === '#map';
   byId('map').hidden = !mapMode;
   byId('ar').hidden = mapMode;
+  byId('satellite-search').hidden = !mapMode;
   byId('ar-link').setAttribute('aria-current', mapMode ? 'false' : 'page');
   byId('map-link').setAttribute('aria-current', mapMode ? 'page' : 'false');
   if (mapMode) stopCamera();
@@ -295,6 +348,7 @@ byId('camera').onclick = async () => {
     video.srcObject = stream;
     await video.play();
     button.textContent = 'Stop camera';
+    if (!observer) requestLocation();
   } catch {
     stopCamera();
     arError = 'Camera unavailable. Check browser permissions and HTTPS.';
@@ -311,7 +365,7 @@ document.addEventListener('visibilitychange', () => {
   if (document.hidden) stopCamera();
   else update();
 });
-setInterval(update, 250);
+setInterval(update, 120);
 setInterval(() => {
   if (!document.hidden && Date.now() - Math.max(Number(read('active-gp-attempt')), feedAttempts.get('active-gp') ?? 0) >= twoHours &&
       !read('active-gp-paused') && !feedPaused.has('active-gp')) void loadCatalog();
@@ -319,4 +373,3 @@ setInterval(() => {
 route();
 void loadLand().then(() => { lastMap = 0; update(); }).catch(() => { byId('map-status').textContent = 'Basemap unavailable.'; });
 void loadCatalog();
-

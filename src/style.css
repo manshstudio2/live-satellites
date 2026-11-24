@@ -9,7 +9,6 @@ video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cov
 .cross { position: absolute; width: 44px; height: 44px; border: 1px solid #9ae8c5; border-radius: 50%; top: 50%; left: 50%; transform: translate(-50%, -50%); }
 .cross::after { content: '+'; display: grid; place-items: center; height: 100%; color: #9ae8c5; }
 #guidance { position: absolute; bottom: 0; left: 12px; right: 12px; color: white; background: #101c21df; border-radius: 8px; padding: 8px 12px; width: fit-content; max-width: calc(100% - 24px); }
-#marker { position: absolute; color: #101c21; background: #9ae8c5; border-radius: 999px; padding: 4px 8px; font-weight: 700; white-space: nowrap; }
 .actions { display: flex; flex-wrap: wrap; gap: 10px; margin: 15px 0 24px; }
 button { border: 1px solid #9ae8c5; background: #9ae8c5; color: #101c21; font: inherit; font-weight: 700; padding: 11px 16px; border-radius: 8px; cursor: pointer; }
 button + button { background: transparent; color: #9ae8c5; }
@@ -31,7 +30,11 @@ h1 { font-size: clamp(2rem, 7vw, 3.5rem); }
 #results, #candidates { padding: 0; list-style: none; display: flex; flex-wrap: wrap; gap: 7px; }
 #results:empty, #candidates:empty, #search-status:empty, #map-status:empty { display: none; }
 #results button, #candidates button { color: #cbe9e0; background: #192f38; border-color: #42615e; padding: 6px 9px; font-size: .88rem; }
-#marker { transform: translate(-50%, -50%); max-width: 80%; text-overflow: ellipsis; overflow: hidden; }
 #ar > .note { margin-top: -8px; }
 #pass { padding: 12px 14px; border-radius: 8px; background: #172b35; }
 
+#satellite-overlay { position: absolute; inset: 0; pointer-events: none; }
+.sky-target { position: absolute; transform: translate(-50%, -50%); pointer-events: auto; padding: 3px 7px; border-radius: 6px; color: #edf7ff; background: #162a3ce8; border: 1px solid #77a5d0; font-size: .74rem; white-space: nowrap; max-width: 45%; overflow: hidden; text-overflow: ellipsis; }
+.sky-target.illuminated { border-color: #9ae8c5; }
+.sky-target.likely { background: #9ae8c5; color: #10221d; z-index: 2; }
+#matching:empty { display: none; }

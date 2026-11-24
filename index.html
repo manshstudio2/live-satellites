@@ -14,11 +14,11 @@
       <div class="view" aria-label="Sky camera">
         <video muted playsinline></video>
         <span class="cross" aria-hidden="true"></span>
-        <span id="marker" hidden></span>
+        <div id="satellite-overlay" aria-label="Predicted satellite positions"></div>
         <p id="guidance">Start the camera and hold a moving light in the reticle.</p>
       </div>
       <div class="actions"><button id="camera">Start camera</button></div>
-      <p id="matching" class="note">Matches are estimates. Aircraft and other lights may look similar.</p>
+      <p id="matching" class="note"></p>
       <ul id="candidates" aria-label="Likely satellite matches"></ul>
     </section>
     <section id="map" aria-label="2D View" hidden>
@@ -29,9 +29,9 @@
     </section>
     <section class="readout" aria-labelledby="pass-title">
       <div class="actions"><button id="location">Use my location</button></div>
-      <label for="search">Find a satellite</label>
-      <input type="search" id="search" placeholder="Name or NORAD ID" autocomplete="off">
-      <p id="search-status" role="status"></p><ul id="results" aria-label="Satellite search results"></ul>
+      <div id="satellite-search" hidden><label for="search">Find a satellite by name</label>
+      <input type="search" id="search" placeholder="For example, ISS" autocomplete="off">
+      <p id="search-status" role="status"></p><ul id="results" aria-label="Satellite search results"></ul></div>
       <p id="feed" role="status">Loading orbital data…</p>
       <h2 id="pass-title">Satellite details</h2>
       <p id="position"></p>
@@ -50,4 +50,3 @@
   <script type="module" src="/src/main.js"></script>
 </body>
 </html>
-
