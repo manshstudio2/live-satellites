@@ -18,7 +18,7 @@ export function parseCatalog(csv) {
         required.some(key => !fields[key]?.trim() || !Number.isFinite(Number(fields[key])))) continue;
     const record = json2satrec(fields);
     if (!record.error && epoch > (catalog.get(id)?.epoch ?? -Infinity)) {
-      catalog.set(id, { id, name: id === '25544' ? 'ISS (ZARYA)' : fields.OBJECT_NAME || id, record, epoch });
+      catalog.set(id, { id, name: fields.OBJECT_NAME || 'Satellite ' + id, record, epoch });
     }
   }
   if (!catalog.size) throw new Error('No valid orbital elements');
@@ -98,5 +98,3 @@ export function findPass(record, observer, now) {
   }
   return null;
 }
-
-

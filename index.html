@@ -18,7 +18,7 @@
         <p id="guidance">Start the camera and hold a moving light in the reticle.</p>
       </div>
       <div class="actions"><button id="camera">Start camera</button></div>
-      <p id="matching" class="note"></p>
+      <p id="sky-summary"></p><p id="matching" class="note"></p>
       <ul id="candidates" aria-label="Likely satellite matches"></ul>
     </section>
     <section id="map" aria-label="2D View" hidden>
@@ -27,22 +27,22 @@
       </div>
       <p id="map-status" role="status"></p><p class="note legend">Blue · satellite and ground track (dashed ahead) &nbsp; Mint · you</p>
     </section>
-    <section class="readout" aria-labelledby="pass-title">
+    <section class="readout" aria-label="Satellite information">
       <div class="actions"><button id="location">Use my location</button></div>
       <div id="satellite-search" hidden><label for="search">Find a satellite by name</label>
-      <input type="search" id="search" placeholder="For example, ISS" autocomplete="off">
+      <input type="search" id="search" placeholder="Satellite name" autocomplete="off">
       <p id="search-status" role="status"></p><ul id="results" aria-label="Satellite search results"></ul></div>
       <p id="feed" role="status">Loading orbital data…</p>
-      <h2 id="pass-title">Satellite details</h2>
+      <p id="observer" role="status">Location is needed for local predictions.</p>
+      <div id="satellite-details" hidden><h2 id="pass-title">Satellite details</h2>
       <p id="position"></p>
       <p id="direction"></p>
-      <p id="observer" role="status">Location is needed for local predictions.</p>
       <p id="visibility"></p>
       <dl id="pass" hidden>
         <div><dt>Above 10°</dt><dd id="rise"></dd></div>
         <div><dt>Peak</dt><dd id="peak"></dd></div>
         <div><dt>Below 10°</dt><dd id="set"></dd></div>
-      </dl>
+      </dl></div>
       <p class="note">Camera and location data stay on this device.</p>
     </section>
     <footer>Orbital elements from <a href="https://celestrak.org/">CelesTrak</a>. Basemap from <a href="https://www.naturalearthdata.com/">Natural Earth</a>.</footer>

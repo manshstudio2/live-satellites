@@ -8,15 +8,12 @@ const byId = id => document.getElementById(id);
 const video = document.querySelector('video');
 const view = document.querySelector('.view');
 const activeUrl = 'https://celestrak.org/NORAD/elements/gp.php?GROUP=active&FORMAT=CSV';
-const stationsUrl = 'https://celestrak.org/NORAD/elements/gp.php?GROUP=stations&FORMAT=CSV';
-const issUrl = 'https://celestrak.org/NORAD/elements/gp.php?CATNR=25544&FORMAT=CSV';
 const twoHours = 7_200_000;
 const staleAge = 3 * 86_400_000;
 const timeLabel = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' });
 const passCache = new Map();
 let catalog = new Map();
-let activeCatalog = false;
-let selectedId = '25544';
+let selectedId;
 let observer, pose, stream, arError, lastMap = 0;
 let mapMode = false;
 let samples = [];
@@ -66,22 +63,12 @@ const feedPaused = new Set();
 
 async function loadCatalog() {
   const csv = await fetchElements(activeUrl, 'active-gp');
-  if (csv) {
-    catalog = parseCatalog(csv);
-    activeCatalog = true;
-  } else if (!catalog.size) {
-    const nearbyCatalog = await fetchElements(stationsUrl, 'stations-gp') ?? await fetchElements(issUrl, 'iss-gp');
-    if (nearbyCatalog) catalog = parseCatalog(nearbyCatalog);
-  }
-  if (!catalog.has(selectedId)) selectedId = catalog.keys().next().value ?? '25544';
-  if (catalog.size) {
-    byId('feed').textContent = activeCatalog
-      ? catalog.size.toLocaleString() + ' active satellites · CelesTrak'
-      : catalog.size > 1 ? 'Full catalog unavailable · ' + catalog.size + ' space station objects' : 'Full catalog unavailable · ISS fallback';
-  } else {
-    byId('feed').textContent = 'Orbital data unavailable. Try again later.';
-  }
-  passCache.clear();
+  if (csv) catalog = parseCatalog(csv);
+  if (!catalog.has(selectedId)) selectedId = undefined;
+  byId('feed').textContent = catalog.size
+    ? catalog.size.toLocaleString() + ' active satellites · CelesTrak'
+    : 'The active satellite catalog is unavailable. Live positions will appear when orbital data loads.';
+    passCache.clear();
   lastMap = 0;
   showSearch();
   update();
@@ -131,6 +118,7 @@ function update() {
   if (document.hidden) return;
   const now = Date.now();
   const satellite = catalog.get(selectedId);
+  byId('satellite-details').hidden = !satellite;
   const fresh = isFresh(satellite, now);
   const clock = skyClock(now);
   const look = fresh && observer ? lookAt(satellite.record, observer, now, clock) : null;
@@ -159,7 +147,8 @@ function update() {
   }
   const pass = result?.pass;
   byId('pass').hidden = !pass;
-  if (observer) {
+  if (observer && !satellite) byId('observer').textContent = 'Location ready';
+  if (observer && satellite) {
     byId('observer').textContent = fresh
       ? pass ? 'Predicted local pass above 10°' : 'No completed pass above 10° found in the next 72 hours.'
       : 'Fresh orbital elements are needed for local predictions.';
@@ -181,6 +170,7 @@ function drawCamera(now, clock) {
       : !observer ? 'Allow location to see satellites in your camera view.'
         : 'Compass unavailable. Try the 2D View.';
     matchLabel.textContent = '';
+    byId('sky-summary').textContent = '';
     samples = [];
     matches = [];
     skyTargets = [];
@@ -231,6 +221,7 @@ function drawCamera(now, clock) {
   }
   paintTargets(overlay, inFrame, featured);
   const count = inFrame.length;
+  byId('sky-summary').textContent = skyTargets.length + ' above your horizon · ' + count + ' in view';
   guidance.textContent = count ? count + (count === 1 ? ' predicted satellite in view' : ' predicted satellites in view')
     : catalog.size ? 'No predicted satellites in this direction' : 'Waiting for orbital data';
   matchLabel.textContent = likely ? 'Likely match · ' + best.satellite.name
