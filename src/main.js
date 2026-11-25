@@ -221,7 +221,7 @@ function drawCamera(now, clock) {
   const elevation = Number(byId('aim-elevation').value);
   const cameraPose = manual ? manualAngles(bearing, elevation) : pose;
   byId('aim-values').textContent = bearing + '° true · ' + elevation + '° elevation';
-  byId('motion-state').textContent = stream ? manual ? 'Manual aim' : pose ? 'Phone motion active' : motionMessage : '';
+  byId('motion-state').textContent = motionRequested || stream ? manual ? 'Manual aim' : pose ? 'Phone motion active' : motionMessage : '';
   const scan = now - lastScan >= 850;
   if (scan && observer) {
     lastScan = now;
@@ -359,11 +359,14 @@ async function enableMotion() {
     motionMessage = 'Motion access is unavailable. Open this link directly in Safari or Chrome, or use Manual aim.';
   }
   if (!pose && motionMessage.startsWith('Move')) {
-    motionMessage = 'Hold the phone flat briefly, then point up. If motion is blocked, use Manual aim.';
+    motionMessage = 'Tilt the phone a little forward or back to get a compass reading. If motion is blocked, use Manual aim.';
   }
   update();
 }
-byId('enable-motion').onclick = () => { void enableMotion(); };
+byId('enable-motion').onclick = () => {
+  byId('manual-aim').open = false;
+  void enableMotion();
+};
 byId('manual-aim').addEventListener('toggle', () => {
   samples = [];
   matches = [];
@@ -414,7 +417,7 @@ byId('camera').onclick = async () => {
   button.disabled = true;
   arError = '';
   try {
-    await enableMotion();
+    if (!motionRequested && !byId('manual-aim').open) await enableMotion();
     const camera = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false });
     if (document.hidden || earthMode) { camera.getTracks().forEach(track => track.stop()); return; }
     stream = camera;

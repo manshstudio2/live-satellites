@@ -37,9 +37,13 @@ export function orientationAngles(event, offset) {
   if (event.absolute || event.type === 'deviceorientationabsolute') {
     return { alpha: alpha * radians, beta: beta * radians, gamma: gamma * radians, offset };
   }
+  const topProjection = Math.cos(beta * radians);
+  // When the top of the phone tilts past vertical its projected heading reverses.
+  // Near vertical the projection is unstable, so retain the previous calibration.
   if (Number.isFinite(heading) && heading >= 0 && !(Number.isFinite(accuracy) && accuracy < 0) &&
-      Math.abs(beta) < 35 && Math.abs(gamma) < 35) {
-    offset = (-heading - alpha) * radians;
+      Math.abs(topProjection) > .25 && (offset === undefined || Math.abs(beta) < 35)) {
+    const topHeading = heading + (topProjection < 0 ? 180 : 0);
+    offset = (-topHeading - alpha) * radians;
   }
   if (offset === undefined) return null;
   return { alpha: alpha * radians + offset, beta: beta * radians, gamma: gamma * radians, offset };
