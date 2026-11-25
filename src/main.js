@@ -404,6 +404,11 @@ async function enableMotion() {
   }
   update();
 }
+byId('motion-help').onclick = () => {
+  const panel = byId('motion-help-panel');
+  panel.hidden = !panel.hidden;
+  byId('motion-help').setAttribute('aria-expanded', String(!panel.hidden));
+};
 byId('enable-motion').onclick = () => {
   byId('manual-aim').open = false;
   void enableMotion();

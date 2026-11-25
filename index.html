@@ -17,7 +17,13 @@
         <div id="satellite-overlay" aria-label="Predicted satellite positions"></div>
         <p id="guidance">Start the camera and hold a moving light in the reticle.</p>
       </div>
-      <div class="actions"><button id="camera">Start camera</button><button id="enable-motion" type="button">Enable phone motion</button></div>
+      <div class="actions"><button id="camera">Start camera</button><button id="enable-motion" type="button">Enable phone motion</button><button id="motion-help" type="button" aria-label="Motion settings help" aria-controls="motion-help-panel" aria-expanded="false">?</button></div>
+      <section id="motion-help-panel" aria-label="Motion settings help" hidden>
+        <h2>Allow phone motion</h2>
+        <p><strong>Android Chrome</strong> · Open Chrome’s ⋮ menu, then <strong>Settings → Site settings → Motion sensors</strong>. Allow motion sensors and check that this site is not listed as blocked.</p>
+        <p><strong>iPhone Safari</strong> · Open this page directly in Safari. Tap <strong>Enable phone motion</strong> and choose <strong>Allow</strong> when Safari asks.</p>
+        <p>Return here, reload the page, and tap <strong>Enable phone motion</strong> again.</p>
+      </section>
       <p id="motion-state" class="note" role="status"></p>
       <details id="manual-aim"><summary>Manual aim</summary>
         <label for="aim-bearing">True bearing</label><input id="aim-bearing" type="range" min="0" max="359" value="0">
