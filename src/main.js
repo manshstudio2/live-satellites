@@ -1,6 +1,6 @@
 import './style.css';
 import { findPass, groundAt, lookAt, parseCatalog, radians, skyClock, skyIsDark } from './orbit.js';
-import { project, orientationAngles, manualAngles } from './camera.js';
+import { project, orientationAngles, manualAngles, quaternionPose } from './camera.js';
 import { updateGlobe, loadEarthTextures } from './globe.js';
 import { centerLight } from './light.js';
 
@@ -17,6 +17,7 @@ let selectedId;
 let observer, pose, stream, arError, lastPosition = 0;
 let earthMode = false;
 let motionRequested = false;
+let orientationSensor, cameraFrame = 0, lastCameraFrame = 0, lastOrientationEvent = -Infinity;
 let compassOffset;
 let motionMessage = '';
 let samples = [];
@@ -337,12 +338,51 @@ function rankMatches(inFrame, radius) {
   return nearby.sort((a, b) => a.score - b.score).slice(0, 3);
 }
 
+function queueCameraFrame() {
+  if (!stream || earthMode || document.hidden || cameraFrame) return;
+  cameraFrame = requestAnimationFrame(() => {
+    cameraFrame = 0;
+    if (!stream || earthMode || document.hidden || performance.now() - lastCameraFrame < 30) return;
+    lastCameraFrame = performance.now();
+    const now = Date.now();
+    drawCamera(now, skyClock(now));
+  });
+}
+
+function startOrientationSensor() {
+  if (orientationSensor || typeof window.AbsoluteOrientationSensor !== 'function') return;
+  try {
+    const sensor = new window.AbsoluteOrientationSensor({ frequency: 30, referenceFrame: 'device' });
+    orientationSensor = sensor;
+    sensor.addEventListener('reading', () => {
+      if (orientationSensor !== sensor || performance.now() - lastOrientationEvent < 750) return;
+      const next = quaternionPose(sensor.quaternion);
+      if (!next) return;
+      pose = next;
+      queueCameraFrame();
+    });
+    sensor.addEventListener('error', ({ error }) => {
+      if (orientationSensor !== sensor) return;
+      sensor.stop();
+      orientationSensor = undefined;
+      if (!pose && error.name === 'NotAllowedError') {
+        motionMessage = 'Motion sensors are blocked. Allow Motion sensors in browser site settings.';
+      }
+    });
+    sensor.start();
+  } catch {
+    orientationSensor = undefined;
+  }
+}
+
 function receivePose(event) {
   if (!stream && !motionRequested) return;
   const angles = orientationAngles(event, compassOffset);
   if (!angles) return;
   compassOffset = angles.offset;
   pose = angles;
+  lastOrientationEvent = performance.now();
+  queueCameraFrame();
 }
 
 async function enableMotion() {
@@ -350,6 +390,7 @@ async function enableMotion() {
   pose = undefined;
   compassOffset = undefined;
   motionMessage = 'Move your phone slowly so the compass can align.';
+  startOrientationSensor();
   try {
     if (typeof window.DeviceOrientationEvent?.requestPermission === 'function') {
       const permission = await window.DeviceOrientationEvent.requestPermission(true);
@@ -387,7 +428,7 @@ function requestLocation() {
     update();
   }, () => {
     byId('observer').textContent = 'Location unavailable. Check browser permissions and try again.';
-  }, { timeout: 12000 });
+  }, { timeout: 15000, enableHighAccuracy: true, maximumAge: 10000 });
 }
 byId('location').onclick = requestLocation;
 function stopCamera() {
@@ -396,6 +437,11 @@ function stopCamera() {
   pose = undefined;
   compassOffset = undefined;
   motionRequested = false;
+  orientationSensor?.stop();
+  orientationSensor = undefined;
+  lastOrientationEvent = -Infinity;
+  cancelAnimationFrame(cameraFrame);
+  cameraFrame = 0;
   video.srcObject = null;
   byId('camera').textContent = 'Start camera';
 }
