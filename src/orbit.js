@@ -9,8 +9,8 @@ export function parseCatalog(csv) {
   const required = ['BSTAR', 'MEAN_MOTION_DOT', 'MEAN_MOTION_DDOT', 'ECCENTRICITY', 'ARG_OF_PERICENTER', 'INCLINATION', 'MEAN_ANOMALY', 'MEAN_MOTION', 'RA_OF_ASC_NODE'];
   const catalog = new Map();
   for (const row of rows) {
-    const values = (row.match(/"(?:[^"]|"")*"|[^,]+|(?<=,)(?=,|$)|^(?=,)/g) ?? [])
-      .map(value => value.startsWith('"') ? value.slice(1, -1).replaceAll('""', '"') : value);
+    const values = Array.from(row.matchAll(/(?:^|,)(?:"((?:[^"]|"")*)"|([^,]*))/g),
+      match => match[1] === undefined ? match[2] : match[1].replace(/""/g, '"'));
     const fields = Object.fromEntries(header.map((key, index) => [key, values[index]]));
     const id = fields.NORAD_CAT_ID;
     const epoch = Date.parse(fields.EPOCH?.endsWith('Z') ? fields.EPOCH : fields.EPOCH + 'Z');

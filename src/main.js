@@ -82,11 +82,13 @@ async function refreshCatalog() {
   lastFeedAttempt = Date.now();
   write(feedKey + '-attempt', String(lastFeedAttempt));
   if (!catalog.size) setCatalogStatus('Downloading the full CelesTrak catalog…');
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 120000);
   const slow = setTimeout(() => {
     if (!catalog.size) setCatalogStatus('The CelesTrak download is slow. Still downloading…');
   }, 8000);
   try {
-    const response = await fetch(activeUrl, { signal: AbortSignal.timeout(120000) });
+    const response = await fetch(activeUrl, { signal: controller.signal });
     if (!response.ok) {
       write(feedKey + '-paused', String(response.status));
       setCatalogStatus((catalog.size ? 'Using saved orbital data. ' : '') +
@@ -98,9 +100,10 @@ async function refreshCatalog() {
     await storage?.put(activeUrl, copy).catch(() => {});
   } catch (error) {
     setCatalogStatus((catalog.size ? 'Using saved orbital data. ' : '') +
-      (error.name === 'TimeoutError' ? 'The CelesTrak download timed out.' : 'Could not load current orbital data.'));
+      (controller.signal.aborted ? 'The CelesTrak download timed out.' : 'Could not load current orbital data.'));
   } finally {
     clearTimeout(slow);
+    clearTimeout(timeout);
   }
 }
 
@@ -219,6 +222,14 @@ function drawCamera(now, clock) {
   const cameraPose = manual ? manualAngles(bearing, elevation) : pose;
   byId('aim-values').textContent = bearing + '° true · ' + elevation + '° elevation';
   byId('motion-state').textContent = stream ? manual ? 'Manual aim' : pose ? 'Phone motion active' : motionMessage : '';
+  const scan = now - lastScan >= 850;
+  if (scan && observer) {
+    lastScan = now;
+    skyTargets = satellitesAbove(now, clock);
+    const next = [...skyTargets].sort((a, b) => b.look.elevation - a.look.elevation);
+    renderList(byId('overhead-list'), next.slice(0, 6).map(target => target.satellite));
+  }
+  byId('overhead').hidden = !observer || !skyTargets.length;
   if (!stream || !observer || !cameraPose) {
     guidance.textContent = !stream ? arError || 'Start the camera and point it at the sky.'
       : !observer ? 'Allow location to see satellites in your camera view.'
@@ -227,8 +238,6 @@ function drawCamera(now, clock) {
     byId('sky-summary').textContent = '';
     samples = [];
     matches = [];
-    skyTargets = [];
-    lastScan = 0;
     overlay.replaceChildren();
     renderList(byId('candidates'), []);
     return;
@@ -237,17 +246,12 @@ function drawCamera(now, clock) {
   const height = view.clientHeight;
   const rotation = (screen.orientation?.angle ?? window.orientation ?? 0) * radians;
   const radius = Math.min(width, height) * .15;
-  const scan = now - lastScan >= 850;
   let light;
   if (!manual && now - lastLightSample >= 240) {
     lastLightSample = now;
     light = centerLight(video, view, radius);
     samples = samples.filter(sample => now - sample.time <= 3500);
     if (light) samples.push({ time: now, light, pose: cameraPose, width, height, rotation });
-  }
-  if (scan) {
-    lastScan = now;
-    skyTargets = satellitesAbove(now, clock);
   }
   const inFrame = [];
   for (const target of skyTargets) {
@@ -258,7 +262,7 @@ function drawCamera(now, clock) {
   inFrame.sort((a, b) => a.center - b.center);
   if (scan) matches = rankMatches(inFrame, radius);
   const [best, second] = matches;
-  const latest = samples.at(-1);
+  const latest = samples[samples.length - 1];
   const likely = best && latest && now - latest.time < 550 && best.samples >= 6 && best.lit &&
     best.score < radius * .5 && (!second || second.score - best.score > radius * .2) &&
     inFrame.some(target => target.satellite.id === best.satellite.id);
@@ -314,7 +318,7 @@ function paintTargets(overlay, targets, featured) {
 function rankMatches(inFrame, radius) {
   const recent = samples.slice(-10);
   if (!recent.length) return [];
-  const target = recent.at(-1).light;
+  const target = recent[recent.length - 1].light;
   const nearby = inFrame
     .map(candidate => ({ ...candidate, score: Math.hypot(candidate.point.x - target.x, candidate.point.y - target.y) }))
     .filter(candidate => candidate.score <= radius)
@@ -376,7 +380,7 @@ function requestLocation() {
   navigator.geolocation.getCurrentPosition(({ coords }) => {
     observer = { latitude: coords.latitude * radians, longitude: coords.longitude * radians, height: (coords.altitude ?? 0) / 1000 };
     passCache.clear();
-    lastPosition = 0;
+    lastPosition = lastScan = 0;
     update();
   }, () => {
     byId('observer').textContent = 'Location unavailable. Check browser permissions and try again.';
