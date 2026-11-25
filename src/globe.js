@@ -1,49 +1,34 @@
 import { groundAt, radians } from './orbit.js';
-import landUrl from './land.json?url';
+import dayUrl from './earth-day.webp';
+import nightUrl from './earth-night.webp';
 
 const canvas = document.querySelector('#world');
 const context = canvas.getContext('2d');
 const texture = document.createElement('canvas');
-texture.width = 720;
-texture.height = 360;
+texture.width = 1440;
+texture.height = 720;
 const surface = document.createElement('canvas');
-surface.width = surface.height = 480;
+surface.width = surface.height = 600;
 const surfaceContext = surface.getContext('2d');
-let world, backdropKey, azimuth = 20 * radians, elevation = 18 * radians, zoom = 1;
+let world, night, sun, sunMinute, backdropKey, azimuth = 20 * radians, elevation = 18 * radians, zoom = 1;
 let observer, targets = [], selection, selectSatellite, plotted = [];
-let pointer;
+const pointers = new Map();
 
-export async function loadLand() {
-  const response = await fetch(landUrl);
-  if (!response.ok) throw new Error('Earth texture unavailable');
-  const data = await response.json();
-  const ctx = texture.getContext('2d');
-  ctx.fillStyle = '#173954';
-  ctx.fillRect(0, 0, texture.width, texture.height);
-  ctx.fillStyle = '#4e9b84';
-  for (const { geometry } of data.features) {
-    const polygons = geometry.type === 'Polygon' ? [geometry.coordinates] : geometry.coordinates;
-    for (const polygon of polygons) {
-      ctx.beginPath();
-      for (const ring of polygon) {
-        ring.forEach(([lon, lat], index) => {
-          const x = (lon + 180) * 2;
-          const y = (90 - lat) * 2;
-          if (index === 0) ctx.moveTo(x, y);
-          else ctx.lineTo(x, y);
-        });
-        ctx.closePath();
-      }
-      ctx.fill('evenodd');
-    }
-  }
-  world = ctx.getImageData(0, 0, texture.width, texture.height).data;
+async function readTexture(url) {
+  const image = new Image();
+  image.src = url;
+  await image.decode();
+  const context = texture.getContext('2d', { willReadFrequently: true });
+  context.drawImage(image, 0, 0, texture.width, texture.height);
+  return context.getImageData(0, 0, texture.width, texture.height).data;
+}
+export async function loadEarthTextures() {
+  [world, night] = await Promise.all([readTexture(dayUrl), readTexture(nightUrl)]);
   backdropKey = null;
   render();
 }
-
 function globeSurface() {
-  const key = [azimuth, elevation].join(',');
+  const key = [azimuth, elevation, sunMinute].join(',');
   if (backdropKey === key) return;
   backdropKey = key;
   const size = surface.width;
@@ -51,6 +36,15 @@ function globeSurface() {
   const pixels = surfaceContext.createImageData(size, size);
   const sinLat = Math.sin(elevation);
   const cosLat = Math.cos(elevation);
+  const norm = Math.hypot(sun.x, sun.y, sun.z);
+  const sinLon = Math.sin(azimuth);
+  const cosLon = Math.cos(azimuth);
+  const forward = (sun.x * cosLon + sun.y * sinLon) / norm;
+  const north = sun.z / norm;
+  const sunX = (sun.y * cosLon - sun.x * sinLon) / norm;
+  const sunY = north * cosLat - forward * sinLat;
+  const sunZ = north * sinLat + forward * cosLat;
+
   for (let row = 0; row < size; row++) {
     const y = (half - row - .5) / half;
     for (let col = 0; col < size; col++) {
@@ -64,22 +58,27 @@ function globeSurface() {
       const ty = Math.min(texture.height - 1, Math.floor((.5 - lat / Math.PI) * texture.height));
       const index = 4 * (ty * texture.width + tx);
       const out = 4 * (row * size + col);
-      const light = .65 + .27 * z + .1 * (y - x);
-      const rim = (1 - z) ** 4 * 28;
-      pixels.data[out] = (world?.[index] ?? 23) * light + rim;
-      pixels.data[out + 1] = (world?.[index + 1] ?? 57) * light + rim * 1.5;
-      pixels.data[out + 2] = (world?.[index + 2] ?? 84) * light + rim * 2;
+      const incidence = x * sunX + y * sunY + z * sunZ;
+      const twilight = Math.max(0, Math.min(1, (incidence + .13) / .34));
+      const day = twilight * twilight * (3 - 2 * twilight);
+      const diffuse = day * (.38 + .76 * Math.max(0, incidence));
+      const city = ((night?.[index] ?? 0) / 255) ** 1.05 * (1 - day);
+      const rim = (1 - z) ** 3 * (9 + 67 * day);
+      const warm = Math.max(0, 1 - Math.abs(incidence - .035) * 11) * 13;
+      pixels.data[out] = (world?.[index] ?? 23) * (diffuse + .035) + city * 245 + rim * .29 + warm;
+      pixels.data[out + 1] = (world?.[index + 1] ?? 57) * (diffuse + .04) + city * 163 + rim * .6 + warm * .40;
+      pixels.data[out + 2] = (world?.[index + 2] ?? 84) * (diffuse + .075) + city * 62 + rim + 5;
       pixels.data[out + 3] = Math.min(255, (1 - square) * size * 80);
     }
   }
   surfaceContext.putImageData(pixels, 0, 0);
 }
 function render() {
-  if (canvas.closest('section').hidden) return;
+  if (canvas.closest('section').hidden || !sun) return;
   const { width, height } = canvas;
   const centerX = width / 2;
   const centerY = height / 2;
-  const radius = Math.min(width, height) * .35 * zoom;
+  const radius = Math.min(width, height) * .415 * zoom;
   const project = ({ latitude, longitude, height: altitude = 0 }) => {
     const delta = longitude - azimuth;
     const cos = Math.cos(latitude);
@@ -97,10 +96,14 @@ function render() {
     context.fillStyle = color;
     context.fill();
   }
-  context.fillStyle = '#081722';
+  context.fillStyle = '#02050d';
   context.fillRect(0, 0, width, height);
+  context.save();
+  context.shadowColor = '#468ce8';
+  context.shadowBlur = 19;
   globeSurface();
   context.drawImage(surface, centerX - radius, centerY - radius, radius * 2, radius * 2);
+  context.restore();
   plotted = [];
   for (const { satellite, ground } of targets) {
     const point = project(ground);
@@ -120,7 +123,9 @@ function render() {
     ? '3D Earth with your location and ' + targets.length + ' satellites above your horizon'
     : '3D Earth. Allow location to show satellites above you.');
 }
-export function updateGlobe(location, satellites, time, selected, onSelect) {
+export function updateGlobe(location, satellites, time, selected, onSelect, sunPosition) {
+  sun = sunPosition;
+  sunMinute = Math.floor(time / 60_000);
   if (location && location !== observer) {
     azimuth = location.longitude;
     elevation = location.latitude;
@@ -153,21 +158,26 @@ canvas.addEventListener('keydown', event => {
   adjust(...moves[event.key]);
 });
 canvas.addEventListener('pointerdown', event => {
-  if (pointer) return;
-  pointer = { id: event.pointerId, x: event.clientX, y: event.clientY, distance: 0 };
+  pointers.set(event.pointerId, { x: event.clientX, y: event.clientY, distance: 0 });
+  if (pointers.size > 1) for (const pointer of pointers.values()) pointer.distance = 6;
   canvas.setPointerCapture(event.pointerId);
 });
 canvas.addEventListener('pointermove', event => {
-  if (pointer?.id !== event.pointerId) return;
+  const pointer = pointers.get(event.pointerId);
+  if (!pointer) return;
   const dx = event.clientX - pointer.x;
   const dy = event.clientY - pointer.y;
   pointer.distance += Math.hypot(dx, dy);
+  const second = Array.from(pointers.values()).find(other => other !== pointer);
+  const previousGap = second && Math.hypot(pointer.x - second.x, pointer.y - second.y);
   pointer.x = event.clientX;
   pointer.y = event.clientY;
-  adjust(-dx * .008, dy * .008);
+  if (previousGap > 0) changeZoom(Math.hypot(pointer.x - second.x, pointer.y - second.y) / previousGap);
+  else if (!second) adjust(-dx * .008, dy * .008);
 });
 canvas.addEventListener('pointerup', event => {
-  if (pointer?.id !== event.pointerId) return;
+  const pointer = pointers.get(event.pointerId);
+  if (!pointer) return;
   if (pointer.distance < 6) {
     const box = canvas.getBoundingClientRect();
     const x = (event.clientX - box.left) * canvas.width / box.width;
@@ -180,19 +190,19 @@ canvas.addEventListener('pointerup', event => {
     }
     if (id) selectSatellite(id);
   }
-  pointer = null;
+  pointers.delete(event.pointerId);
 });
-canvas.addEventListener('pointercancel', () => { pointer = null; });
+canvas.addEventListener('lostpointercapture', event => { pointers.delete(event.pointerId); });
 const zoomIn = document.querySelector('#earth-zoom-in');
 const zoomOut = document.querySelector('#earth-zoom-out');
 function changeZoom(scale) {
-  zoom = Math.max(.55, Math.min(1.6, zoom * scale));
+  zoom = Math.max(.48, Math.min(2.7, zoom * scale));
   updateZoomControls();
   render();
 }
 function updateZoomControls() {
-  zoomIn.disabled = zoom >= 1.6;
-  zoomOut.disabled = zoom <= .55;
+  zoomIn.disabled = zoom >= 2.7;
+  zoomOut.disabled = zoom <= .48;
 }
 zoomIn.onclick = () => changeZoom(1.2);
 zoomOut.onclick = () => changeZoom(1 / 1.2);

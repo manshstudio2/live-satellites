@@ -1,7 +1,7 @@
 import './style.css';
 import { findPass, groundAt, lookAt, parseCatalog, radians, skyClock, skyIsDark } from './orbit.js';
-import { project } from './camera.js';
-import { updateGlobe, loadLand } from './globe.js';
+import { project, orientationAngles, manualAngles } from './camera.js';
+import { updateGlobe, loadEarthTextures } from './globe.js';
 import { centerLight } from './light.js';
 
 const byId = id => document.getElementById(id);
@@ -16,6 +16,9 @@ let catalog = new Map();
 let selectedId;
 let observer, pose, stream, arError, lastPosition = 0;
 let earthMode = false;
+let motionRequested = false;
+let compassOffset;
+let motionMessage = '';
 let samples = [];
 let matches = [];
 let lastScan = 0;
@@ -154,7 +157,7 @@ function update() {
     lastPosition = now;
     if (earthMode) {
       const targets = observer ? satellitesAbove(now, clock) : [];
-      updateGlobe(observer, targets, now, selectedId, selectSatellite);
+      updateGlobe(observer, targets, now, selectedId, selectSatellite, clock.sunEcf);
       byId('earth-status').textContent = observer
         ? catalog.size ? targets.length + ' predicted above your horizon' : catalogStatus
         : 'Use your location to see satellites above you.';
@@ -210,10 +213,16 @@ function drawCamera(now, clock) {
   const overlay = byId('satellite-overlay');
   const guidance = byId('guidance');
   const matchLabel = byId('matching');
-  if (!stream || !observer || !pose || performance.now() - pose.received > 2500) {
+  const manual = byId('manual-aim').open;
+  const bearing = Number(byId('aim-bearing').value);
+  const elevation = Number(byId('aim-elevation').value);
+  const cameraPose = manual ? manualAngles(bearing, elevation) : pose;
+  byId('aim-values').textContent = bearing + '° true · ' + elevation + '° elevation';
+  byId('motion-state').textContent = stream ? manual ? 'Manual aim' : pose ? 'Phone motion active' : motionMessage : '';
+  if (!stream || !observer || !cameraPose) {
     guidance.textContent = !stream ? arError || 'Start the camera and point it at the sky.'
       : !observer ? 'Allow location to see satellites in your camera view.'
-        : 'Compass unavailable. Try 3D Earth.';
+        : 'Allow phone motion or use Manual aim.';
     matchLabel.textContent = '';
     byId('sky-summary').textContent = '';
     samples = [];
@@ -230,11 +239,11 @@ function drawCamera(now, clock) {
   const radius = Math.min(width, height) * .15;
   const scan = now - lastScan >= 850;
   let light;
-  if (now - lastLightSample >= 240) {
+  if (!manual && now - lastLightSample >= 240) {
     lastLightSample = now;
     light = centerLight(video, view, radius);
     samples = samples.filter(sample => now - sample.time <= 3500);
-    if (light) samples.push({ time: now, light, pose, width, height, rotation });
+    if (light) samples.push({ time: now, light, pose: cameraPose, width, height, rotation });
   }
   if (scan) {
     lastScan = now;
@@ -242,7 +251,7 @@ function drawCamera(now, clock) {
   }
   const inFrame = [];
   for (const target of skyTargets) {
-    const point = project(target.look, pose, width, height, rotation);
+    const point = project(target.look, cameraPose, width, height, rotation);
     if (!point.visible) continue;
     inFrame.push({ ...target, point, center: Math.hypot(point.x - width / 2, point.y - height / 2) });
   }
@@ -263,7 +272,7 @@ function drawCamera(now, clock) {
   byId('sky-summary').textContent = skyTargets.length + ' above your horizon · ' + count + ' in view';
   guidance.textContent = count ? count + (count === 1 ? ' predicted satellite in view' : ' predicted satellites in view')
     : catalog.size ? 'No predicted satellites in this direction' : catalogStatus;
-  matchLabel.textContent = likely ? 'Likely match · ' + best.satellite.name
+  matchLabel.textContent = manual ? 'Align bearing and elevation with where the camera is pointed.' : likely ? 'Likely match · ' + best.satellite.name
     : latest && now - latest.time < 550
       ? best ? 'Possible matches · keep the light centered' : 'No confident satellite match'
       : 'Center a moving light to identify it';
@@ -325,11 +334,39 @@ function rankMatches(inFrame, radius) {
 }
 
 function receivePose(event) {
-  if ((event.absolute || event.type === 'deviceorientationabsolute') &&
-      [event.alpha, event.beta, event.gamma].every(Number.isFinite)) {
-    pose = { alpha: event.alpha * radians, beta: event.beta * radians, gamma: event.gamma * radians, received: performance.now() };
-  }
+  if (!stream && !motionRequested) return;
+  const angles = orientationAngles(event, compassOffset);
+  if (!angles) return;
+  compassOffset = angles.offset;
+  pose = angles;
 }
+
+async function enableMotion() {
+  motionRequested = true;
+  pose = undefined;
+  compassOffset = undefined;
+  motionMessage = 'Move your phone slowly so the compass can align.';
+  try {
+    if (typeof window.DeviceOrientationEvent?.requestPermission === 'function') {
+      const permission = await window.DeviceOrientationEvent.requestPermission(true);
+      if (permission !== 'granted') motionMessage = 'Motion permission denied. Allow it in browser settings or use Manual aim.';
+    }
+  } catch {
+    motionMessage = 'Motion access is unavailable. Open this link directly in Safari or Chrome, or use Manual aim.';
+  }
+  if (!pose && motionMessage.startsWith('Move')) {
+    motionMessage = 'Hold the phone flat briefly, then point up. If motion is blocked, use Manual aim.';
+  }
+  update();
+}
+byId('enable-motion').onclick = () => { void enableMotion(); };
+byId('manual-aim').addEventListener('toggle', () => {
+  samples = [];
+  matches = [];
+  lastScan = 0;
+  update();
+});
+
 function requestLocation() {
   if (!navigator.geolocation) {
     byId('observer').textContent = 'Location requires a supported browser over HTTPS.';
@@ -349,6 +386,9 @@ byId('location').onclick = requestLocation;
 function stopCamera() {
   stream?.getTracks().forEach(track => track.stop());
   stream = null;
+  pose = undefined;
+  compassOffset = undefined;
+  motionRequested = false;
   video.srcObject = null;
   byId('camera').textContent = 'Start camera';
 }
@@ -370,9 +410,7 @@ byId('camera').onclick = async () => {
   button.disabled = true;
   arError = '';
   try {
-    if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
-      await DeviceOrientationEvent.requestPermission().catch(() => 'denied');
-    }
+    await enableMotion();
     const camera = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false });
     if (document.hidden || earthMode) { camera.getTracks().forEach(track => track.stop()); return; }
     stream = camera;
@@ -401,5 +439,5 @@ setInterval(() => {
   if (!document.hidden && Date.now() - Math.max(Number(read(feedKey + '-attempt')), lastFeedAttempt) >= twoHours && !read(feedKey + '-paused')) void loadCatalog();
 }, 60_000);
 route();
-void loadLand().then(() => { lastPosition = 0; update(); }).catch(() => { byId('earth-map-error').textContent = 'Earth texture unavailable.'; });
+void loadEarthTextures().then(() => { lastPosition = 0; update(); }).catch(() => { byId('earth-map-error').textContent = 'Earth texture unavailable.'; });
 void loadCatalog();

@@ -29,3 +29,22 @@ export function project(look, pose, width, height, screenAngle) {
     angle: Math.atan2(offsetY, offsetX) / radians,
   };
 }
+
+// Safari provides compass heading alongside orientation in a relative frame.
+export function orientationAngles(event, offset) {
+  const { alpha, beta, gamma, webkitCompassHeading: heading, webkitCompassAccuracy: accuracy } = event;
+  if (![alpha, beta, gamma].every(Number.isFinite)) return null;
+  if (event.absolute || event.type === 'deviceorientationabsolute') {
+    return { alpha: alpha * radians, beta: beta * radians, gamma: gamma * radians, offset };
+  }
+  if (Number.isFinite(heading) && heading >= 0 && !(Number.isFinite(accuracy) && accuracy < 0) &&
+      Math.abs(beta) < 35 && Math.abs(gamma) < 35) {
+    offset = (-heading - alpha) * radians;
+  }
+  if (offset === undefined) return null;
+  return { alpha: alpha * radians + offset, beta: beta * radians, gamma: gamma * radians, offset };
+}
+
+export function manualAngles(bearing, elevation) {
+  return { alpha: -bearing * radians, beta: (90 + elevation) * radians, gamma: 0 };
+}

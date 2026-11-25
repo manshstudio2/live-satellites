@@ -17,7 +17,13 @@
         <div id="satellite-overlay" aria-label="Predicted satellite positions"></div>
         <p id="guidance">Start the camera and hold a moving light in the reticle.</p>
       </div>
-      <div class="actions"><button id="camera">Start camera</button></div>
+      <div class="actions"><button id="camera">Start camera</button><button id="enable-motion" type="button">Enable phone motion</button></div>
+      <p id="motion-state" class="note" role="status"></p>
+      <details id="manual-aim"><summary>Manual aim</summary>
+        <label for="aim-bearing">True bearing</label><input id="aim-bearing" type="range" min="0" max="359" value="0">
+        <label for="aim-elevation">Elevation</label><input id="aim-elevation" type="range" min="-20" max="90" value="45">
+        <output id="aim-values" for="aim-bearing aim-elevation"></output>
+      </details>
       <p id="sky-summary"></p><p id="matching" class="note"></p>
       <ul id="candidates" aria-label="Likely satellite matches"></ul>
     </section>
@@ -25,7 +31,7 @@
       <div class="earth-frame">
         <canvas id="world" width="760" height="600" tabindex="0" role="img" aria-label="3D Earth with satellite positions"></canvas>
       </div>
-      <p id="earth-map-error" role="status"></p><p id="earth-status"></p><div class="actions" role="group" aria-label="Earth controls"><button id="earth-zoom-in" type="button">Zoom in</button><button id="earth-zoom-out" type="button">Zoom out</button><button id="center-earth" type="button">Recenter Earth</button></div><p class="note legend">Drag to rotate. Blue dots are satellites. Mint marks your location. Orbital heights are visually compressed.</p>
+      <p id="earth-map-error" role="status"></p><p id="earth-status"></p><div class="actions" role="group" aria-label="Earth controls"><button id="earth-zoom-in" type="button">Zoom in</button><button id="earth-zoom-out" type="button">Zoom out</button><button id="center-earth" type="button">Recenter Earth</button></div><p class="note legend">Drag to rotate. Pinch to zoom. Blue dots are satellites. Mint marks your location. Orbital heights are visually compressed.</p>
     </section>
     <section class="readout" aria-label="Satellite information">
       <div class="actions"><button id="location">Use my location</button></div>
@@ -45,7 +51,7 @@
       </dl></div>
       <p class="note">Camera and location data stay on this device.</p>
     </section>
-    <footer>Orbital elements from <a href="https://celestrak.org/">CelesTrak</a>. Basemap from <a href="https://www.naturalearthdata.com/">Natural Earth</a>.</footer>
+    <footer>Orbital elements from <a href="https://celestrak.org/">CelesTrak</a>. Earth imagery from <a href="https://science.nasa.gov/earth/earth-observatory/blue-marble-next-generation/base-topography-bathymetry/">NASA Blue Marble</a> and <a href="https://science.nasa.gov/earth/earth-observatory/earth-at-night/maps/">Black Marble</a>.</footer>
   </main>
   <script type="module" src="/src/main.js"></script>
 </body>

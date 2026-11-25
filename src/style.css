@@ -38,3 +38,9 @@ h1 { font-size: clamp(2rem, 7vw, 3.5rem); }
 .sky-target.illuminated { border-color: #9ae8c5; }
 .sky-target.likely { background: #9ae8c5; color: #10221d; z-index: 2; }
 #matching:empty { display: none; }
+#motion-state:empty { display: none; }
+#manual-aim { margin: 0 0 12px; }
+#manual-aim summary { cursor: pointer; color: #9ae8c5; }
+#manual-aim label, #manual-aim input { display: block; }
+#manual-aim label { margin-top: 10px; }
+#manual-aim input { width: min(100%, 24rem); }
