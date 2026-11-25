@@ -48,3 +48,4 @@ h1 { font-size: clamp(2rem, 7vw, 3.5rem); }
 #motion-help-panel { margin-bottom: 14px; padding: 12px 16px; border: 1px solid #42615e; border-radius: 10px; background: #15272f; }
 #motion-help-panel h2 { margin: 0; font-size: 1.05rem; }
 #motion-help-panel p { margin: 8px 0 0; }
+#earth-all-orbits[aria-pressed='true'] { background: #9ae8c5; color: #101c21; }

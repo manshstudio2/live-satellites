@@ -1,5 +1,5 @@
 import './style.css';
-import { findPass, groundAt, lookAt, parseCatalog, radians, skyClock, skyIsDark } from './orbit.js';
+import { findPass, groundAt, isLowEarthOrbit, lookAt, parseCatalog, radians, skyClock, skyIsDark } from './orbit.js';
 import { project, orientationAngles, manualAngles, quaternionPose } from './camera.js';
 import { updateGlobe, loadEarthTextures } from './globe.js';
 import { centerLight } from './light.js';
@@ -16,6 +16,7 @@ let catalog = new Map();
 let selectedId;
 let observer, pose, stream, arError, lastPosition = 0;
 let earthMode = false;
+let showAllEarthOrbits = false;
 let motionRequested = false;
 let orientationSensor, cameraFrame = 0, lastCameraFrame = 0, lastOrientationEvent = -Infinity;
 let compassOffset;
@@ -114,7 +115,11 @@ function isFresh(satellite, now) {
 function formatAngle(angle) {
   return (angle / radians).toFixed(1) + '°';
 }
+function canShowSatellite(satellite) {
+  return satellite && ((earthMode && showAllEarthOrbits) || isLowEarthOrbit(satellite.record));
+}
 function selectSatellite(id) {
+  if (!canShowSatellite(catalog.get(id))) return;
   selectedId = id;
   lastPosition = 0;
   update();
@@ -140,13 +145,24 @@ function showSearch() {
   if (query) {
     for (const sat of catalog.values()) {
       if (found.length >= 8) break;
-      if (sat.name.toUpperCase().includes(query)) found.push(sat);
+      if (canShowSatellite(sat) && sat.name.toUpperCase().includes(query)) found.push(sat);
     }
   }
   renderList(results, found);
   byId('search-status').textContent = query && !found.length ? 'No matching satellites.' : '';
 }
 byId('search').addEventListener('input', showSearch);
+byId('earth-all-orbits').onclick = () => {
+  showAllEarthOrbits = !showAllEarthOrbits;
+  byId('earth-all-orbits').setAttribute('aria-pressed', String(showAllEarthOrbits));
+  clearHiddenSelection();
+  showSearch();
+  lastPosition = 0;
+  update();
+};
+function clearHiddenSelection() {
+  if (!canShowSatellite(catalog.get(selectedId))) selectedId = undefined;
+}
 
 function update() {
   if (document.hidden) return;
@@ -160,10 +176,10 @@ function update() {
   if (now - lastPosition >= 1000) {
     lastPosition = now;
     if (earthMode) {
-      const targets = observer ? satellitesAbove(now, clock) : [];
+      const targets = observer ? satellitesAbove(now, clock, showAllEarthOrbits) : [];
       updateGlobe(observer, targets, now, selectedId, selectSatellite, clock.sunEcf);
       byId('earth-status').textContent = observer
-        ? catalog.size ? targets.length + ' predicted above your horizon' : catalogStatus
+        ? catalog.size ? targets.length + (showAllEarthOrbits ? ' satellites' : ' LEO satellites') + ' above your horizon' : catalogStatus
         : 'Use your location to see satellites above you.';
     }
     const point = fresh && groundAt(satellite.record, now);
@@ -202,11 +218,11 @@ function update() {
   if (!earthMode) drawCamera(now, clock);
 }
 
-function satellitesAbove(now, clock) {
+function satellitesAbove(now, clock, includeHigherOrbits = false) {
   const dark = skyIsDark(observer, clock);
   const targets = [];
   for (const satellite of catalog.values()) {
-    if (!isFresh(satellite, now)) continue;
+    if ((!includeHigherOrbits && !isLowEarthOrbit(satellite.record)) || !isFresh(satellite, now)) continue;
     const look = lookAt(satellite.record, observer, now, clock);
     if (look?.elevation >= 0) targets.push({ satellite, look, lit: dark && look.sunlit });
   }
@@ -274,7 +290,7 @@ function drawCamera(now, clock) {
   }
   paintTargets(overlay, inFrame, featured);
   const count = inFrame.length;
-  byId('sky-summary').textContent = skyTargets.length + ' above your horizon · ' + count + ' in view';
+  byId('sky-summary').textContent = skyTargets.length + ' LEO satellites above your horizon · ' + count + ' in view';
   guidance.textContent = count ? count + (count === 1 ? ' predicted satellite in view' : ' predicted satellites in view')
     : catalog.size ? 'No predicted satellites in this direction' : catalogStatus;
   matchLabel.textContent = manual ? 'Align bearing and elevation with where the camera is pointed.' : likely ? 'Likely match · ' + best.satellite.name
@@ -459,6 +475,8 @@ function route() {
   byId('ar-link').setAttribute('aria-current', earthMode ? 'false' : 'page');
   byId('earth-link').setAttribute('aria-current', earthMode ? 'page' : 'false');
   if (earthMode) stopCamera();
+  clearHiddenSelection();
+  showSearch();
   lastPosition = 0;
   update();
 }

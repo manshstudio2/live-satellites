@@ -2,6 +2,11 @@ import { ecfToLookAngles, eciToEcf, eciToGeodetic, gstime, jday, json2satrec, pr
 
 export const radians = Math.PI / 180;
 const minute = 60_000;
+const sgp4EarthRadiusKm = 6378.135;
+
+export function isLowEarthOrbit(record) {
+  return record.altp >= 0 && record.alta * sgp4EarthRadiusKm <= 2000;
+}
 const minimumElevation = 10 * radians;
 export function parseCatalog(csv) {
   const rows = csv.trim().replace(/^\uFEFF/, '').split(/\r?\n/);
