@@ -49,3 +49,4 @@ h1 { font-size: clamp(2rem, 7vw, 3.5rem); }
 #motion-help-panel h2 { margin: 0; font-size: 1.05rem; }
 #motion-help-panel p { margin: 8px 0 0; }
 #earth-all-orbits[aria-pressed='true'] { background: #9ae8c5; color: #101c21; }
+#camera-path { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }

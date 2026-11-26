@@ -11,7 +11,7 @@ const surface = document.createElement('canvas');
 surface.width = surface.height = 600;
 const surfaceContext = surface.getContext('2d');
 let world, night, sun, sunMinute, backdropKey, azimuth = 20 * radians, elevation = 18 * radians, zoom = 1;
-let observer, targets = [], selection, selectSatellite, plotted = [];
+let observer, targets = [], selection, selectSatellite, plotted = [], trajectory = [];
 const pointers = new Map();
 
 async function readTexture(url) {
@@ -104,12 +104,38 @@ function render() {
   globeSurface();
   context.drawImage(surface, centerX - radius, centerY - radius, radius * 2, radius * 2);
   context.restore();
+  context.beginPath();
+  context.strokeStyle = '#a7e7ff';
+  context.lineWidth = 2;
+  context.setLineDash([6, 5]);
+  let previousVisible = false;
+  for (const ground of trajectory) {
+    const point = ground && project(ground);
+    if (!point?.visible) { previousVisible = false; continue; }
+    if (previousVisible) context.lineTo(point.x, point.y);
+    else context.moveTo(point.x, point.y);
+    previousVisible = true;
+  }
+  context.stroke();
+  context.setLineDash([]);
   plotted = [];
   for (const { satellite, ground } of targets) {
     const point = project(ground);
     if (!point.visible) continue;
     const selected = satellite.id === selection;
     dot(point, selected ? 6 : 2.5, selected ? '#ffe0a3' : '#b0c9ff');
+    if (selected) {
+      context.font = 'bold 17px system-ui';
+      const name = satellite.name;
+      const width = Math.min(220, context.measureText(name).width);
+      const x = Math.max(6, Math.min(canvas.width - width - 6, point.x + 10));
+      const y = Math.max(20, point.y - 9);
+      context.strokeStyle = '#081722';
+      context.lineWidth = 4;
+      context.strokeText(name, x, y, 220);
+      context.fillStyle = '#ffe0a3';
+      context.fillText(name, x, y, 220);
+    }
     plotted.push({ ...point, id: satellite.id });
   }
   if (observer) {
@@ -123,7 +149,7 @@ function render() {
     ? '3D Earth with your location and ' + targets.length + ' satellites above your horizon'
     : '3D Earth. Allow location to show satellites above you.');
 }
-export function updateGlobe(location, satellites, time, selected, onSelect, sunPosition) {
+export function updateGlobe(location, satellites, time, selected, onSelect, sunPosition, selectedSatellite) {
   sun = sunPosition;
   sunMinute = Math.floor(time / 60_000);
   if (location && location !== observer) {
@@ -132,6 +158,12 @@ export function updateGlobe(location, satellites, time, selected, onSelect, sunP
   }
   observer = location;
   selection = selected;
+  trajectory = [];
+  if (selectedSatellite) {
+    for (let minutes = 0; minutes <= 20; minutes += .5) {
+      trajectory.push(groundAt(selectedSatellite.record, time + minutes * 60_000));
+    }
+  }
   selectSatellite = onSelect;
   targets = satellites.flatMap(({ satellite }) => {
     const ground = groundAt(satellite.record, time);

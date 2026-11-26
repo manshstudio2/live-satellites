@@ -14,6 +14,8 @@ const timeLabel = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', time
 const passCache = new Map();
 let catalog = new Map();
 let selectedId;
+let pinnedId;
+let cameraPath = {};
 let observer, pose, stream, arError, lastPosition = 0;
 let earthMode = false;
 let showAllEarthOrbits = false;
@@ -51,7 +53,7 @@ function useCatalog(csv, cached) {
   }
   if (!next.size) return false;
   catalog = next;
-  if (!catalog.has(selectedId)) selectedId = undefined;
+  if (!catalog.has(selectedId)) selectedId = pinnedId = undefined;
   passCache.clear();
   lastPosition = lastScan = 0;
   setCatalogStatus(catalog.size.toLocaleString() + ' active satellites · ' + (cached ? 'saved CelesTrak data' : 'CelesTrak'));
@@ -120,7 +122,7 @@ function canShowSatellite(satellite) {
 }
 function selectSatellite(id) {
   if (!canShowSatellite(catalog.get(id))) return;
-  selectedId = id;
+  selectedId = pinnedId = id;
   lastPosition = 0;
   update();
 }
@@ -161,7 +163,7 @@ byId('earth-all-orbits').onclick = () => {
   update();
 };
 function clearHiddenSelection() {
-  if (!canShowSatellite(catalog.get(selectedId))) selectedId = undefined;
+  if (!canShowSatellite(catalog.get(selectedId))) selectedId = pinnedId = undefined;
 }
 
 function update() {
@@ -169,6 +171,10 @@ function update() {
   const now = Date.now();
   const satellite = catalog.get(selectedId);
   byId('satellite-details').hidden = !satellite;
+  const pathLabel = byId('trajectory-label');
+  pathLabel.hidden = !satellite || (!earthMode && !pinnedId);
+  pathLabel.textContent = earthMode ? 'Dashed line · predicted path over the next 20 minutes.'
+    : 'Dashed line · predicted path over the next 2 minutes, where it crosses the camera view.';
   const fresh = isFresh(satellite, now);
   const clock = skyClock(now);
   const look = fresh && observer ? lookAt(satellite.record, observer, now, clock) : null;
@@ -177,7 +183,7 @@ function update() {
     lastPosition = now;
     if (earthMode) {
       const targets = observer ? satellitesAbove(now, clock, showAllEarthOrbits) : [];
-      updateGlobe(observer, targets, now, selectedId, selectSatellite, clock.sunEcf);
+      updateGlobe(observer, targets, now, selectedId, selectSatellite, clock.sunEcf, fresh ? satellite : null);
       byId('earth-status').textContent = observer
         ? catalog.size ? targets.length + (showAllEarthOrbits ? ' satellites' : ' LEO satellites') + ' above your horizon' : catalogStatus
         : 'Use your location to see satellites above you.';
@@ -256,6 +262,7 @@ function drawCamera(now, clock) {
     samples = [];
     matches = [];
     overlay.replaceChildren();
+    drawCameraPath(now, null, view.clientWidth, view.clientHeight, 0);
     renderList(byId('candidates'), []);
     return;
   }
@@ -284,11 +291,12 @@ function drawCamera(now, clock) {
     best.score < radius * .5 && (!second || second.score - best.score > radius * .2) &&
     inFrame.some(target => target.satellite.id === best.satellite.id);
   const featured = likely ? best.satellite.id : null;
-  if (featured && selectedId !== featured) {
+  if (!pinnedId && featured && selectedId !== featured) {
     selectedId = featured;
     lastPosition = 0;
   }
-  paintTargets(overlay, inFrame, featured);
+  drawCameraPath(now, cameraPose, width, height, rotation);
+  paintTargets(overlay, inFrame, pinnedId ?? featured);
   const count = inFrame.length;
   byId('sky-summary').textContent = skyTargets.length + ' LEO satellites above your horizon · ' + count + ' in view';
   guidance.textContent = count ? count + (count === 1 ? ' predicted satellite in view' : ' predicted satellites in view')
@@ -298,6 +306,35 @@ function drawCamera(now, clock) {
       ? best ? 'Possible matches · keep the light centered' : 'No confident satellite match'
       : 'Center a moving light to identify it';
   renderList(byId('candidates'), matches.map(match => match.satellite));
+}
+
+function drawCameraPath(now, pose, width, height, rotation) {
+  const canvas = byId('camera-path');
+  const context = canvas.getContext('2d');
+  if (canvas.width !== width) canvas.width = width;
+  if (canvas.height !== height) canvas.height = height;
+  context.clearRect(0, 0, width, height);
+  const satellite = catalog.get(pinnedId);
+  if (!pose || !observer || !isFresh(satellite, now)) return;
+  if (cameraPath.id !== satellite.id || cameraPath.observer !== observer || now - cameraPath.time >= 1000) {
+    cameraPath = { id: satellite.id, observer, time: now, looks: [] };
+    for (let seconds = 0; seconds <= 120; seconds += 2) {
+      cameraPath.looks.push(lookAt(satellite.record, observer, now + seconds * 1000));
+    }
+  }
+  context.strokeStyle = '#a7e7ff';
+  context.lineWidth = 2;
+  context.setLineDash([5, 5]);
+  context.beginPath();
+  let previous = false;
+  for (const look of cameraPath.looks) {
+    const point = look?.elevation >= 0 && project(look, pose, width, height, rotation);
+    if (!point || point.behind) { previous = false; continue; }
+    if (previous) context.lineTo(point.x, point.y);
+    else context.moveTo(point.x, point.y);
+    previous = true;
+  }
+  context.stroke();
 }
 
 function paintTargets(overlay, targets, featured) {
@@ -324,7 +361,7 @@ function paintTargets(overlay, targets, featured) {
     marker.style.top = target.point.y + 'px';
     marker.classList.toggle('likely', id === featured);
     marker.classList.toggle('illuminated', target.lit);
-    marker.setAttribute('aria-label', target.satellite.name + (id === featured ? ', likely match' : ', predicted position'));
+    marker.setAttribute('aria-label', target.satellite.name + (id === pinnedId ? ', selected satellite' : id === featured ? ', likely match' : ', predicted position'));
     marker.textContent = index < 5 || id === featured ? target.satellite.name : '•';
   }
   for (const marker of Array.from(overlay.children)) {
